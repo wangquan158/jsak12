@@ -1,3 +1,4 @@
+
 #!/usr/bin/env bash
 #===============================================================================
 #
@@ -24,7 +25,6 @@ ORIGINAL=${PWD}
 
 echo
 cat << EOF
-
           ██████╗██╗  ██╗ █████╗ ████████╗ ██████╗ ██████╗ ████████╗    ██╗    ██╗███████╗██████╗ 
          ██╔════╝██║  ██║██╔══██╗╚══██╔══╝██╔════╝ ██╔══██╗╚══██╔══╝    ██║    ██║██╔════╝██╔══██╗
          ██║     ███████║███████║   ██║   ██║  ███╗██████╔╝   ██║       ██║ █╗ ██║█████╗  ██████╔╝
@@ -34,24 +34,27 @@ cat << EOF
                                                                                          
 EOF
 
+echo "----------------------------------------------------------------------------------------------------------"
+echo -e "\033[32m机场推荐\033[0m(\033[34m按量不限时，解锁ChatGPT\033[0m)：\033[34;4mhttps://mojie.mx/#/register?code=CG6h8Irm\033[0m"
+
 SUCCESS() {
   ${SETCOLOR_SUCCESS} && echo "------------------------------------< $1 >-------------------------------------"  && ${SETCOLOR_NORMAL}
 }
 
 SUCCESS1() {
-  ${SETCOLOR_SUCCESS} && echo " $1 "  && ${SETCOLOR_NORMAL}
+  ${SETCOLOR_SUCCESS} && echo "$1"  && ${SETCOLOR_NORMAL}
 }
 
 ERROR() {
-  ${SETCOLOR_RED} && echo " $1 "  && ${SETCOLOR_NORMAL}
+  ${SETCOLOR_RED} && echo "$1"  && ${SETCOLOR_NORMAL}
 }
 
 INFO() {
-  ${SETCOLOR_SKYBLUE} && echo " $1 "  && ${SETCOLOR_NORMAL}
+  ${SETCOLOR_SKYBLUE} && echo "$1"  && ${SETCOLOR_NORMAL}
 }
 
 WARN() {
-  ${SETCOLOR_YELLOW} && echo " $1 "  && ${SETCOLOR_NORMAL}
+  ${SETCOLOR_YELLOW} && echo "$1"  && ${SETCOLOR_NORMAL}
 }
 
 # 进度条
@@ -77,9 +80,29 @@ echo
 # OS version
 OSVER=$(cat /etc/centos-release | grep -o '[0-9]' | head -n 1)
 
+# Attempts to install
+maxAttempts=3
+attempts=0
+
 function CHECKMEM() {
 INFO "Checking server memory resources. Please wait."
-yum install -y bc &>/dev/null
+if ! command -v bc &> /dev/null; then
+    while [ $attempts -lt $maxAttempts ]; do
+        yum install -y bc lsof &>/dev/null
+        if [ $? -ne 0 ]; then
+            ((attempts++))
+            WARN "尝试安装内存计算工具 (Attempt: $attempts)"
+
+            if [ $attempts -eq $maxAttempts ]; then
+                ERROR "内存计算工具安装失败，请尝试手动执行安装。"
+                echo "命令：yum install -y bc"
+                exit 1
+            fi
+        else
+            break
+        fi
+    done
+fi
 total=$(free -m | awk 'NR==2{print $2}')  # 获取总内存数
 used=$(free -m | awk 'NR==2{print $3}')   # 获取已使用的内存数
 rate=$(echo "scale=2; $used/$total*100" | bc)  # 计算内存使用率
@@ -102,7 +125,7 @@ firewall_status=$(systemctl is-active firewalld)
 if [[ $firewall_status == 'active' ]]; then
     # If firewall is enabled, disable it
     systemctl stop firewalld
-    systemctl disable firewalld
+    systemctl disable firewalld &> /dev/null
     INFO "Firewall has been disabled."
 else
     INFO "Firewall is already disabled."
@@ -120,6 +143,27 @@ fi
 DONE
 }
 
+function INSTALL_PACKAGE() {
+SUCCESS "Install necessary system components."
+if [ "$OSVER" = "8" ]; then
+    dnf -y install epel* &>/dev/null
+    dnf -y install wget &>/dev/null
+    dnf -y install git &>/dev/null
+    dnf -y install openssl-devel zlib-devel gd-devel &>/dev/null
+    dnf -y install pcre-devel pcre2 &>/dev/null
+elif [ "$OSVER" = "7" ]; then
+    yum -y install epel* &>/dev/null
+    yum -y install wget &>/dev/null
+    yum -y install git &>/dev/null
+    yum -y install openssl-devel  zlib-devel gd-devel &>/dev/null
+    yum -y install pcre-devel pcre2 &>/dev/null
+else
+    ERROR "Unsupported OS version: $OSVER"
+    exit 1
+fi
+DONE
+}
+
 function INSTALL_NGINX() {
 SUCCESS "Nginx detection and installation."
 # 检查是否已安装Nginx
@@ -129,41 +173,52 @@ else
   SUCCESS1 "Installing Nginx..."
   NGINX="nginx-1.24.0-1.el${OSVER}.ngx.x86_64.rpm"
   if [ "$OSVER" = "8" ]; then
-      # 下载并安装RPM包
-      dnf -y install wget git openssl-devel pcre-devel zlib-devel gd-devel &>/dev/null
-      dnf -y install pcre2 &>/dev/null
       rm -f ${NGINX}
       wget http://nginx.org/packages/centos/${OSVER}/x86_64/RPMS/${NGINX} &>/dev/null
-      dnf -y install ${NGINX} &>/dev/null
-      if [ $? -ne 0 ]; then
-        WARN "安装失败，请手动安装，安装成功之后再次执行脚本！"
-        echo " 命令：wget http://nginx.org/packages/centos/${OSVER}/x86_64/RPMS/${NGINX} && yum -y install ${NGINX}"
-        exit 1
-      else
-        INFO "Nginx installed."
-        rm -f ${NGINX}
-      fi
+      while [ $attempts -lt $maxAttempts ]; do
+          dnf -y install ${NGINX} &>/dev/null
+          if [ $? -ne 0 ]; then
+              ((attempts++))
+              WARN "尝试安装Nginx (Attempt: $attempts)"
+
+              if [ $attempts -eq $maxAttempts ]; then
+                  ERROR "Nginx安装失败，请尝试手动执行安装。"
+		  rm -f ${NGINX}
+                  echo "命令：wget http://nginx.org/packages/centos/${OSVER}/x86_64/RPMS/${NGINX} && dnf -y install ${NGINX}"
+                  exit 1
+              fi
+          else
+              INFO "Nginx installed."
+              rm -f ${NGINX}
+              break
+          fi
+      done
   elif [ "$OSVER" = "7" ]; then
-      # 下载并安装RPM包
-      yum -y install wget git openssl-devel pcre-devel zlib-devel gd-devel &>/dev/null
-      yum -y install pcre2 &>/dev/null
       rm -f ${NGINX}
       wget http://nginx.org/packages/centos/${OSVER}/x86_64/RPMS/${NGINX} &>/dev/null
-      yum -y install ${NGINX} &>/dev/null
-      if [ $? -ne 0 ]; then
-        WARN "安装失败，请手动安装，安装成功之后再次执行脚本！"
-        echo " 命令：wget http://nginx.org/packages/centos/${OSVER}/x86_64/RPMS/${NGINX} && yum -y install ${NGINX}"
-        exit 1
-      else
-        echo "Nginx installed."
-        rm -f ${NGINX}
-      fi
+      while [ $attempts -lt $maxAttempts ]; do
+          yum -y install ${NGINX} &>/dev/null
+          if [ $? -ne 0 ]; then
+              ((attempts++))
+              WARN "尝试安装Nginx (Attempt: $attempts)"
+
+              if [ $attempts -eq $maxAttempts ]; then
+                  ERROR "Nginx安装失败，请尝试手动执行安装。"
+		  rm -f ${NGINX}
+                  echo "命令：wget http://nginx.org/packages/centos/${OSVER}/x86_64/RPMS/${NGINX} && yum -y install ${NGINX}"
+                  exit 1
+              fi
+          else
+              INFO "Nginx installed."
+              rm -f ${NGINX}
+              break
+          fi
+      done
   else
     ERROR "Unsupported OS version: $OSVER"
     exit 1
   fi
 fi
-
 
 # 检查Nginx是否正在运行
 if pgrep "nginx" > /dev/null;then
@@ -185,18 +240,56 @@ if ! command -v node &> /dev/null;then
     # 安装 Node.js
     if [ "$OSVER" = "8" ]; then
         dnf -y install libstdc++.so.glibc glibc lsof &>/dev/null
-        curl -fsSL https://rpm.nodesource.com/setup_16.x | bash - &>/dev/null
-        dnf install -y nodejs &>/dev/null
+        curl -fsSL https://rpm.nodesource.com/setup_lts.x | bash - &>/dev/null
+	if [ $? -ne 0 ]; then
+	    ERROR "NodeJS安装失败！"
+	    exit 1
+	fi
+        while [ $attempts -lt $maxAttempts ]; do
+            dnf install -y nodejs &>/dev/null
+            if [ $? -ne 0 ]; then
+                ((attempts++))
+                WARN "尝试安装NodeJS (Attempt: $attempts)"
+
+                if [ $attempts -eq $maxAttempts ]; then
+                    ERROR "NodeJS安装失败，请尝试手动执行安装。"
+                    echo " 命令：dnf install -y nodejs"
+                    exit 1
+                fi
+            else
+                INFO "NodeJS installed."
+                break
+            fi
+        done
     elif [ "$OSVER" = "7" ]; then
         yum -y install libstdc++.so.glibc glibc lsof &>/dev/null
         curl -fsSL https://rpm.nodesource.com/setup_16.x | bash - &>/dev/null
-        yum install -y nodejs &>/dev/null
+	if [ $? -ne 0 ]; then
+            ERROR "NodeJS安装失败！"
+            exit 1
+        fi
+        while [ $attempts -lt $maxAttempts ]; do
+            yum install -y nodejs &>/dev/null
+            if [ $? -ne 0 ]; then
+                ((attempts++))
+                WARN "尝试安装NodeJS (Attempt: $attempts)"
+
+                if [ $attempts -eq $maxAttempts ]; then
+                    ERROR "NodeJS安装失败，请尝试手动执行安装。"
+                    echo " 命令：yum install -y nodejs"
+                    exit 1
+                fi
+            else
+                INFO "NodeJS installed."
+                break
+            fi
+        done
     else
         ERROR "Unsupported OS version: $OSVER"
         exit 1
     fi
 else
-    INFO "Node.js 已安装..."
+    INFO "Node.js Installed..."
 fi
 
 # 检查是否安装了 pnpm
@@ -204,9 +297,24 @@ if ! command -v pnpm &> /dev/null
 then
     WARN "pnpm 未安装，正在进行安装..."
     # 安装 pnpm
-    npm install -g pnpm &>/dev/null
+    while [ $attempts -lt $maxAttempts ]; do
+        npm install -g pnpm &>/dev/null
+        if [ $? -ne 0 ]; then
+            ((attempts++))
+            WARN "尝试安装pnpm (Attempt: $attempts)"
+
+            if [ $attempts -eq $maxAttempts ]; then
+                ERROR "pnpm安装失败，请尝试手动执行安装。"
+                echo " 命令：npm install -g pnpm"
+                exit 1
+            fi
+        else
+            INFO "pnpm installed."
+            break
+        fi
+    done
 else
-    INFO "pnpm 已安装..." 
+    INFO "pnpm Installed..." 
 fi
 DONE
 }
@@ -251,14 +359,22 @@ gpgcheck=1
 enabled=1
 gpgkey=https://www.mongodb.org/static/pgp/server-6.0.asc
 EOF
-    yum install -y mongodb-org &>/dev/null
-    if [ $? -ne 0 ]; then
-       WARN "安装失败，请手动安装，安装成功之后再次执行脚本！[注：一般为网络环境导致安装失败]"
-       echo " 命令：yum install -y mongodb-org"
-       exit 1
-    else
-       INFO "MongoDB installed."
-    fi
+    while [ $attempts -lt $maxAttempts ]; do
+        yum install -y mongodb-org &>/dev/null
+        if [ $? -ne 0 ]; then
+            ((attempts++))
+            WARN "尝试安装mongodb (Attempt: $attempts)"
+
+            if [ $attempts -eq $maxAttempts ]; then
+                ERROR "mongodb安装失败，请尝试手动执行安装。"
+                echo " 命令：yum install -y mongodb-org"
+                exit 1
+            fi
+        else
+            INFO "MongoDB installed."
+            break
+        fi
+    done
 fi
 
 # 启动 MongoDB 服务
@@ -266,6 +382,7 @@ if systemctl is-active mongod >/dev/null 2>&1; then
     INFO "MongoDB 已启动"
     MONGO_USER
 else
+    systemctl daemon-reexec &>/dev/null
     systemctl enable --now mongod &>/dev/null
     if systemctl is-active mongod >/dev/null 2>&1; then
         INFO "MongoDB 启动成功"
@@ -280,11 +397,12 @@ DONE
 
 function GITCLONE() {
 SUCCESS "项目克隆"
-CGPTWEB="https://github.com/sukeyang/chatgpt-web"
+rm -rf chatgpt-web &>/dev/null
+CGPTWEB="https://github.com/Chanzhaoyu/chatgpt-web"
 KGPTWEB="https://github.com/Kerwin1202/chatgpt-web"
 
 ${SETCOLOR_RED} && echo "请选择要克隆的仓库：" && ${SETCOLOR_NORMAL}
-echo "1. sukeyang/chatgpt-web[不带用户中心]"
+echo "1. Chanzhaoyu/chatgpt-web[不带用户中心]"
 echo "2. Kerwin1202/chatgpt-web[带用户中心]"
 
 while true; do
@@ -364,8 +482,8 @@ if [ -f .userinfo ]; then
       ${SETCOLOR_SUCCESS} && echo "当前描述信息默认为：${INFO}" && ${SETCOLOR_NORMAL}
       # 修改个人信息
       sed -i "s/ChenZhaoYu/${USER}/g" ${ORIGINAL}/${CHATDIR}/src/store/modules/user/helper.ts
-      sed -i "s/Star on <a href=\"https:\/\/github.com\/sukeyang\/chatgpt-bot\" class=\"text-blue-500\" target=\"_blank\" >GitHub<\/a>/${INFO}/g" ${ORIGINAL}/${CHATDIR}/src/store/modules/user/helper.ts
-      sed -i "s#https://raw.githubusercontent.com/sukeyang/chatgpt-web/main/src/assets/avatar.jpg#${AVATAR}#g" ${ORIGINAL}/${CHATDIR}/src/store/modules/user/helper.ts
+      sed -i "s/Star on <a href=\"https:\/\/github.com\/Chanzhaoyu\/chatgpt-bot\" class=\"text-blue-500\" target=\"_blank\" >GitHub<\/a>/${INFO}/g" ${ORIGINAL}/${CHATDIR}/src/store/modules/user/helper.ts
+      sed -i "s#https://raw.githubusercontent.com/Chanzhaoyu/chatgpt-web/main/src/assets/avatar.jpg#${AVATAR}#g" ${ORIGINAL}/${CHATDIR}/src/store/modules/user/helper.ts
       # 删除配置里面的GitHub相关信息内容(可选，建议保留，尊重项目作者成果)
       #sed -i '/<div class="p-2 space-y-2 rounded-md bg-neutral-100 dark:bg-neutral-700">/,/<\/div>/d' ${ORIGINAL}/${CHATDIR}/src/components/common/Setting/About.vue
   else
@@ -376,8 +494,8 @@ if [ -f .userinfo ]; then
       ${SETCOLOR_SUCCESS} && echo "当前描述信息默认为：${INFO}" && ${SETCOLOR_NORMAL}
       # 修改个人信息
       sed -i "s/ChenZhaoYu/${USER}/g" ${ORIGINAL}/${CHATDIR}/src/store/modules/user/helper.ts
-      sed -i "s/Star on <a href=\"https:\/\/github.com\/sukeyang\/chatgpt-bot\" class=\"text-blue-500\" target=\"_blank\" >GitHub<\/a>/${INFO}/g" ${ORIGINAL}/${CHATDIR}/src/store/modules/user/helper.ts
-      sed -i "s#https://raw.githubusercontent.com/sukeyang/chatgpt-web/main/src/assets/avatar.jpg#${AVATAR}#g" ${ORIGINAL}/${CHATDIR}/src/store/modules/user/helper.ts
+      sed -i "s/Star on <a href=\"https:\/\/github.com\/Chanzhaoyu\/chatgpt-bot\" class=\"text-blue-500\" target=\"_blank\" >GitHub<\/a>/${INFO}/g" ${ORIGINAL}/${CHATDIR}/src/store/modules/user/helper.ts
+      sed -i "s#https://raw.githubusercontent.com/Chanzhaoyu/chatgpt-web/main/src/assets/avatar.jpg#${AVATAR}#g" ${ORIGINAL}/${CHATDIR}/src/store/modules/user/helper.ts
       # 删除配置里面的GitHub相关信息内容(可选，建议保留，尊重项目作者成果)
       #sed -i '/<div class="p-2 space-y-2 rounded-md bg-neutral-100 dark:bg-neutral-700">/,/<\/div>/d' ${ORIGINAL}/${CHATDIR}/src/components/common/Setting/About.vue
    fi
@@ -393,8 +511,8 @@ else
       ${SETCOLOR_SUCCESS} && echo "当前描述信息默认为：${INFO}" && ${SETCOLOR_NORMAL}
       # 修改个人信息
       sed -i "s/ChenZhaoYu/${USER}/g" ${ORIGINAL}/${CHATDIR}/src/store/modules/user/helper.ts
-      sed -i "s/Star on <a href=\"https:\/\/github.com\/sukeyang\/chatgpt-bot\" class=\"text-blue-500\" target=\"_blank\" >GitHub<\/a>/${INFO}/g" ${ORIGINAL}/${CHATDIR}/src/store/modules/user/helper.ts
-      sed -i "s#https://raw.githubusercontent.com/sukeyang/chatgpt-web/main/src/assets/avatar.jpg#${AVATAR}#g" ${ORIGINAL}/${CHATDIR}/src/store/modules/user/helper.ts
+      sed -i "s/Star on <a href=\"https:\/\/github.com\/Chanzhaoyu\/chatgpt-bot\" class=\"text-blue-500\" target=\"_blank\" >GitHub<\/a>/${INFO}/g" ${ORIGINAL}/${CHATDIR}/src/store/modules/user/helper.ts
+      sed -i "s#https://raw.githubusercontent.com/Chanzhaoyu/chatgpt-web/main/src/assets/avatar.jpg#${AVATAR}#g" ${ORIGINAL}/${CHATDIR}/src/store/modules/user/helper.ts
       # 删除配置里面的GitHub相关信息内容(可选，建议保留，尊重项目作者成果)
       #sed -i '/<div class="p-2 space-y-2 rounded-md bg-neutral-100 dark:bg-neutral-700">/,/<\/div>/d' ${ORIGINAL}/${CHATDIR}/src/components/common/Setting/About.vue
    fi
@@ -459,6 +577,11 @@ echo
 ${SETCOLOR_SUCCESS} && echo "-----------------------------------<前端构建>-----------------------------------" && ${SETCOLOR_NORMAL}
 # 前端
 cd ${ORIGINAL}/${CHATDIR} && BUILDWEB
+directory="${ORIGINAL}/${CHATDIR}/${FONTDIR}"
+if [ ! -d "$directory" ]; then
+    ERROR "Frontend build failed..."
+    exit 1
+fi
 ${SETCOLOR_SUCCESS} && echo "-------------------------------------< END >-------------------------------------" && ${SETCOLOR_NORMAL}
 echo
 echo
@@ -507,7 +630,6 @@ cat > /etc/systemd/system/chatgpt-web.service <<EOF
 [Unit]
 Description=ChatGPT Web Service
 After=network.target
-
 [Service]
 Type=simple
 User=root
@@ -518,7 +640,6 @@ ExecReload=/bin/kill -s HUP \$MAINPID
 ExecStop=/bin/kill -s QUIT \$MAINPID
 Restart=always
 TimeoutStopSec=5s
-
 [Install]
 WantedBy=multi-user.target
 EOF
@@ -585,44 +706,35 @@ cat > /etc/nginx/conf.d/default.conf <<\EOF
 server {
     listen       80;
     server_name  localhost;
-
     #access_log  /var/log/nginx/host.access.log  main;
-
     #禁止境内常见爬虫(根据需求自行控制是否禁止)
     if ($http_user_agent ~* "qihoobot|Yahoo! Slurp China|Baiduspider|Baiduspider-image|spider|Sogou spider|Sogou web spider|Sogou inst spider|Sogou spider2|Sogou blog|Sogou News Spider|Sogou Orion spider|ChinasoSpider|Sosospider|YoudaoBot|yisouspider|EasouSpider|Tomato Bot|Scooter") {
         return 403;
     }
-
     #禁止境外常见爬虫(根据需求自行控制是否禁止)
     if ($http_user_agent ~* "Googlebot|Googlebot-Mobile|AdsBot-Google|Googlebot-Image|Mediapartners-Google|Adsbot-Google|Feedfetcher-Google|Yahoo! Slurp|MSNBot|Catall Spider|ArchitextSpider|AcoiRobot|Applebot|Bingbot|Discordbot|Twitterbot|facebookexternalhit|ia_archiver|LinkedInBot|Naverbot|Pinterestbot|seznambot|Slurp|teoma|TelegramBot|Yandex|Yeti|Infoseek|Lycos|Gulliver|Fast|Grabber") {
         return 403;
     }
-
     #禁止指定 UA 及 UA 为空的访问
     if ($http_user_agent ~ "WinHttp|WebZIP|FetchURL|node-superagent|java/|Bytespider|FeedDemon|Jullo|JikeSpider|Indy Library|Alexa Toolbar|AskTbFXTV|AhrefsBot|CrawlDaddy|CoolpadWebkit|Java|Feedly|Apache-HttpAsyncClient|UniversalFeedParser|ApacheBench|Microsoft URL Control|Swiftbot|ZmEu|oBot|jaunty|Python-urllib|lightDeckReports Bot|YYSpider|DigExt|HttpClient|MJ12bot|heritrix|Ezooms|BOT/0.1|YandexBot|FlightDeckReports|Linguee Bot|iaskspider|^$") {
         return 403;
     }
-
     #禁止非 GET|HEAD|POST 方式的抓取
     if ($request_method !~ ^(GET|HEAD|POST)$) {
         return 403;
     }
-
     #禁止 Scrapy 等工具的抓取
     if ($http_user_agent ~* (Scrapy|HttpClient)) {
         return 403;
     }
-
     location / {
         root   /usr/share/nginx/html;
         index  index.html index.htm;
     }
-
     error_page   500 502 503 504  /50x.html;
     location = /50x.html {
         root   /usr/share/nginx/html;
     }
-
     location /api/ {
         # 处理 Node.js 后端 API 的请求
         proxy_pass http://localhost:3002;
@@ -657,6 +769,7 @@ fi
 function main() {
     CHECKMEM
     CHECKFIRE
+    INSTALL_PACKAGE
     GITCLONE
     INSTALL_NGINX
     NODEJS
